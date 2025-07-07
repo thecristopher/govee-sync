@@ -1,13 +1,26 @@
 import socket
 import json
-import time
+import select
+from colorama import Fore
 
 MULTICAST_GROUP = "239.255.255.250"
-SEND_PORT = 4001
-RECEIVE_PORT = 4002
+PORT_SEND = 4001
+PORT_RECV = 4002
 TIMEOUT = 5
 
 def discover_devices():
+    print(Fore.YELLOW + "🔍 Escaneando luces Govee en la red...")
+
+    # Socket para enviar
+    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sender.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    # Socket para recibir
+    receiver = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    receiver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    receiver.bind(("", PORT_RECV))
+    receiver.settimeout(TIMEOUT)
+
     scan_message = {
         "msg": {
             "cmd": "scan",
@@ -17,41 +30,37 @@ def discover_devices():
         }
     }
 
-    # Paso 1: Enviar mensaje a 239.255.255.250:4001
-    send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    send_sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-    send_sock.sendto(json.dumps(scan_message).encode(), (MULTICAST_GROUP, SEND_PORT))
-    send_sock.close()
+    # Enviar mensaje scan a 239.255.255.250:4001
+    sender.sendto(json.dumps(scan_message).encode(), (MULTICAST_GROUP, PORT_SEND))
 
-    # Paso 2: Escuchar en 0.0.0.0:4002 por las respuestas
-    recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    recv_sock.bind(("", RECEIVE_PORT))
-    recv_sock.settimeout(TIMEOUT)
-
-    print("🔍 Escaneando luces Govee en la red...")
-    devices = []
-    start = time.time()
+    found_devices = []
 
     try:
-        while time.time() - start < TIMEOUT:
-            data, addr = recv_sock.recvfrom(1024)
-            print(f"📥 Paquete recibido de {addr}")
-            try:
+        while True:
+            ready = select.select([receiver], [], [], TIMEOUT)
+            if ready[0]:
+                data, addr = receiver.recvfrom(1024)
+                print(Fore.CYAN + f"📥 Paquete recibido de {addr}")
                 response = json.loads(data)
-                dev = response.get("msg", {}).get("data", {})
-                if "ip" in dev and "device" in dev:
-                    devices.append({
-                        "ip": dev["ip"],
-                        "mac": dev["device"],
-                        "sku": dev.get("sku", "Desconocido")
-                    })
-                    print(f"✅ {dev['ip']} ({dev['device']}) modelo {dev.get('sku', '??')}")
-            except Exception as e:
-                print("⚠️ Error al parsear respuesta:", e)
-    except socket.timeout:
-        print("⏱️ Fin del escaneo")
 
-    recv_sock.close()
-    return devices
+                if response.get("msg", {}).get("cmd") == "scan":
+                    info = response["msg"]["data"]
+                    device = {
+                        "ip": info["ip"],
+                        "mac": info["device"],
+                        "sku": info.get("sku", "Desconocido")
+                    }
+                    if device not in found_devices:
+                        found_devices.append(device)
+                        print(Fore.GREEN + f"✅ {device['ip']} ({device['mac']}) modelo {device['sku']}")
+            else:
+                break
+    except socket.timeout:
+        pass
+    finally:
+        sender.close()
+        receiver.close()
+
+    print("⏱️ Fin del escaneo")
+    return found_devices
 
