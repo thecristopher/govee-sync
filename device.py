@@ -27,7 +27,12 @@ def set_color(device, r, g, b):
     send_udp(device, {
         "msg": {
             "cmd": "colorwc",
-            "data": {"r": r, "g": g, "b": b}
+            "data": {
+                "color": {"r": r, "g": g, "b": b},
+                "colorTemInKelvin": 0
+            }
         }
     })
+
+
 

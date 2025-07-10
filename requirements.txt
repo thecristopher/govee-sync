@@ -1,1 +1,6 @@
-coloroma
+colorama
+pydbus
+pillow
+sounddevice
+numpy
+pydbus
