@@ -12,7 +12,7 @@ def hsv_to_rgb(h, s, v):
     f = (h * 6) - i
     p = v * (1 - s)
     q = v * (1 - f * s)
-    t = v * (1 - (1 - f) * s)
+    t = v * (1 - (1 - f * s))
     i = i % 6
 
     if i == 0: return v, t, p
@@ -23,24 +23,30 @@ def hsv_to_rgb(h, s, v):
     if i == 5: return v, p, q
 
 last_bounce = [0]
-current_hue = [random.random()]  # estado global compartido
+current_hue = [random.random()]
+target_hue = [current_hue[0]]
 
 def volume_to_rgb(volume):
     amplified = min(1.0, volume * 100)
     brightness = max(0.25, amplified)
-
     now = time.time()
-    bounce_interval = 0.2 + (1.0 - amplified) * 1.5  # cuanto más volumen, más rápido
 
-    if now - last_bounce[0] > bounce_interval:
-        new_hue = (current_hue[0] + random.uniform(0.3, 0.6)) % 1
-        current_hue[0] = new_hue
-        last_bounce[0] = now
+    # 💤 Evitar cambios si el volumen es muy bajo
+    if amplified >= 0.05:
+        bounce_interval = 0.4 + (1.0 - amplified) * 1.8
+        if now - last_bounce[0] > bounce_interval:
+            target_hue[0] = (current_hue[0] + random.uniform(0.3, 0.6)) % 1
+            last_bounce[0] = now
+
+        # 🔁 Interpolación suave del hue
+        diff = (target_hue[0] - current_hue[0]) % 1
+        if diff > 0.5:
+            diff -= 1
+        current_hue[0] = (current_hue[0] + diff * 0.02) % 1
 
     hue = current_hue[0]
     sat = 1.0
 
-    # 💫 Si es volumen muy bajo, un modo más suave
     if volume < 0.003:
         brightness = 0.1
         sat = 0.7
@@ -55,7 +61,6 @@ def volume_to_rgb(volume):
         "colorTemInKelvin": 0
     }
 
-# 🚨 Enviar color como 'colorwc'
 def set_color_udp(device, color_data):
     payload = {
         "msg": {
@@ -65,9 +70,8 @@ def set_color_udp(device, color_data):
     }
     send_udp(device, payload)
 
-executor = ThreadPoolExecutor(max_workers = 10)
+executor = ThreadPoolExecutor(max_workers=10)
 
-# 🎧 Iniciar sincronización
 def start_audio_sync():
     print("🎤 Iniciando sincronización por audio desde el sistema (modo visual)...")
 
@@ -90,11 +94,16 @@ def start_audio_sync():
     selected = all_devices[device_index]
     print(f"✅ Dispositivo seleccionado: {selected['name']} (index {device_index})")
 
-    last_color = [None]  # mutable closure para comparar colores
+    last_color = [None]
 
     def audio_callback(indata, frames, time_info, status):
         try:
             volume_norm = np.linalg.norm(indata) / len(indata)
+
+            # ❄️ Silencio total → no enviar nada
+            if volume_norm < 0.001:
+                return
+
             color_data = volume_to_rgb(volume_norm)
 
             if color_data != last_color[0]:
