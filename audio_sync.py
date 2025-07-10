@@ -108,7 +108,6 @@ def start_audio_sync():
 
             if color_data != last_color[0]:
                 last_color[0] = color_data
-                print(f"🔊 Volumen: {volume_norm:.3f} → Color: {color_data['color']}")
                 for device in devices:
                     executor.submit(set_color_udp, device, color_data)
         except Exception as e:
